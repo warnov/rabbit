@@ -1,0 +1,41 @@
+﻿@page "/"
+
+
+@using rabbit_maui.Core.Services
+@inject RallyState RallyState
+@inject IRallyStore RallyStore
+
+<h1>@RallyState.CurrentRally.Name</h1>
+
+<!-- Quick persistence actions -->
+<button @onclick="Save">Save Rally</button>
+<button @onclick="Load">Load Rally</button>
+
+<button @onclick="AddStage">Add Stage</button>
+
+<ul>
+    @foreach (var st in RallyState.CurrentRally.Stages)
+    {
+        <li><a href="@($"/stage/{st.Id}")">@st.Id (@st.Name)</a></li>
+    }
+</ul>
+
+@code {
+    // Store the file in the app's private data folder
+    private string RallyPath => Path.Combine(FileSystem.AppDataDirectory, "rally.json");
+
+    private async Task Save()
+    {
+        await RallyStore.SaveAsync(RallyState.CurrentRally, RallyPath);
+    }
+
+    private async Task Load()
+    {
+        if (!File.Exists(RallyPath)) return;
+        RallyState.CurrentRally = await RallyStore.LoadAsync(RallyPath);
+        RallyState.SelectFirstStage();
+        StateHasChanged();
+    }
+
+    private void AddStage() => RallyState.AddStage();
+}
