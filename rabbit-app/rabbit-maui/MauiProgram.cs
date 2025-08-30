@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
 using rabbit_maui.Core.Services;
 using System.Globalization;
+using CommunityToolkit.Maui;
+
 
 namespace rabbit_maui
 {
@@ -11,6 +13,7 @@ namespace rabbit_maui
             var builder = MauiApp.CreateBuilder();
             builder
                 .UseMauiApp<App>()
+                .UseMauiCommunityToolkit()
                 .ConfigureFonts(fonts =>
                 {
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -30,6 +33,11 @@ namespace rabbit_maui
             // Ensure decimal parsing uses '.' (invariant) across the app
             CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
             CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+
+            // XLSX exporter (OpenXML implementation)
+            builder.Services.AddSingleton<IExcelExporter, OpenXmlExcelExporter>();
+
+
 
             return builder.Build();
         }

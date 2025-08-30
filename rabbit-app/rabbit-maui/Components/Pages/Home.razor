@@ -2,27 +2,57 @@
 
 
 @using rabbit_maui.Core.Services
+@using CommunityToolkit.Maui.Alerts
+@using CommunityToolkit.Maui.Core
 @inject RallyState RallyState
 @inject IRallyStore RallyStore
+@inject IExcelExporter ExcelExporter
 
-<h1>@RallyState.CurrentRally.Name</h1>
+<h1>Edit Rally</h1>
+<!-- Editable rally name -->
+<input type="text" @bind="RallyState.CurrentRally.Name" placeholder="Rally name" />
+
+
 
 <!-- Quick persistence actions -->
 <button @onclick="Save">Save Rally</button>
 <button @onclick="Load">Load Rally</button>
-
+<button @onclick="ExportXlsx">Export XLSX</button>
+<button @onclick="ShareXlsx">Share XLSX</button>
 <button @onclick="AddStage">Add Stage</button>
 
-<ul>
+<!-- Stage list -->
+<ul style="margin-top:12px;">
     @foreach (var st in RallyState.CurrentRally.Stages)
     {
         <li><a href="@($"/stage/{st.Id}")">@st.Id (@st.Name)</a></li>
     }
 </ul>
+<hr />
+
+<h3>Rally Summary</h3>
+<p>Total Distance: @TotalDistance km</p>
+<p>Total Time: @TotalTime min</p>
+<p>Average Speed: @AverageSpeed km/h</p>
+
 
 @code {
     // Store the file in the app's private data folder
     private string RallyPath => Path.Combine(FileSystem.AppDataDirectory, "rally.json");
+    private string XlsxPath
+    {
+        get
+        {
+#if ANDROID
+        // Typical public Download folder in Android
+        return Path.Combine("/storage/emulated/0/Download", "Sections.xlsx");
+#else
+            // Fallback for other platforms
+            return Path.Combine(FileSystem.AppDataDirectory, "Sections.xlsx");
+#endif
+        }
+    }
+
 
     private async Task Save()
     {
@@ -37,5 +67,55 @@
         StateHasChanged();
     }
 
+    private async Task ExportXlsx()  
+    {
+        var bytes = await ExcelExporter.BuildSectionsWorkbookAsync(RallyState.CurrentRally);
+        await File.WriteAllBytesAsync(XlsxPath, bytes);
+        // Optional: show a quick confirmation in console/log; UI toast can come later
+        Console.WriteLine($"Exported: {XlsxPath}");
+
+        // ✅ Show confirmation to the user
+        var toast = Toast.Make($"Rally Info File Exported to: {XlsxPath}",
+        ToastDuration.Short,
+        14); // font size
+        await toast.Show();
+    }
+
+
+    private async Task ShareXlsx()
+    {
+        if (!File.Exists(XlsxPath))
+        {
+            await Toast.Make("No file to share. Export first.", ToastDuration.Short, 14).Show();
+            return;
+        }
+
+        await Share.RequestAsync(new ShareFileRequest
+        {
+            Title = "Rabbit Rally Export",
+            File = new ShareFile(XlsxPath)
+        });
+
+        await Toast.Make("Share sheet opened.", ToastDuration.Short, 14).Show();
+    }
+
+    private Task DisplayAlert(string title, string message, string cancel)
+    {
+        var page = Application.Current?.Windows[0].Page;
+        return page?.DisplayAlert(title, message, cancel)
+               ?? Task.CompletedTask;
+    }
+
+
     private void AddStage() => RallyState.AddStage();
+
+    private double TotalDistance =>
+    RallyState.CurrentRally.Stages.SelectMany(s => s.Segments).Sum(seg => seg.DistanceKm ?? 0);
+    
+    private double TotalTime =>
+    RallyState.CurrentRally.Stages.SelectMany(s => s.Segments).Sum(seg => seg.TimeMin ?? 0);
+
+    private double AverageSpeed =>
+    TotalTime > 0 ? Math.Round((TotalDistance / TotalTime) * 60.0, 1) : 0.0;
+
 }

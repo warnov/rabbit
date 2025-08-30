@@ -22,6 +22,16 @@
         if (stage is null) return;
         if (index >= 0 && index < stage.Segments.Count) stage.Segments.RemoveAt(index);
     }
+
+    private double StageTotalDistance =>
+    stage?.Segments.Sum(seg => seg.DistanceKm ?? 0) ?? 0;
+
+    private double StageTotalTime =>
+    stage?.Segments.Sum(seg => seg.TimeMin ?? 0) ?? 0;
+
+    private double StageAverageSpeed =>
+    StageTotalTime > 0 ? Math.Round((StageTotalDistance / StageTotalTime) * 60.0, 1) : 0.0;
+
 }
 
 @if (stage is null)
@@ -67,4 +77,11 @@ else
         </table>
 
         <button @onclick="@(()=>AddSegment(1.000, 1.0))">Add Segment</button>
+
+        <hr />
+        <h3>Stage Summary</h3>
+        <p>Total Distance: @StageTotalDistance km</p>
+        <p>Total Time: @StageTotalTime min</p>
+        <p>Average Speed: @StageAverageSpeed km/h</p>
+
 }
