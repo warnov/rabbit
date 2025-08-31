@@ -1,25 +1,59 @@
 ﻿@page "/"
-
-
 @using rabbit_maui.Core.Services
 @using CommunityToolkit.Maui.Alerts
 @using CommunityToolkit.Maui.Core
+@using Microsoft.AspNetCore.Components.Web
+
+
 @inject RallyState RallyState
 @inject IRallyStore RallyStore
 @inject IExcelExporter ExcelExporter
 
-<h1>Edit Rally</h1>
-<!-- Editable rally name -->
-<input type="text" @bind="RallyState.CurrentRally.Name" placeholder="Rally name" />
+<!-- Rally name: label that becomes editable when clicked -->
+@if (!isEditingName)
+{
+    <h1 style="display:inline-block; margin-right:8px;"
+        @onclick="BeginEditName">
+        @RallyState.CurrentRally.Name
+    </h1>
+    <button @onclick="BeginEditName" title="Edit name">✎</button>
+}
+else
+{
+    <input type="text"
+           style="font-size:1.5rem; padding:4px 8px; min-width:16ch;"
+           @bind="RallyState.CurrentRally.Name"
+           @onkeydown="HandleNameKeyDown"
+           @onblur="CommitEditName"
+           @ref="nameInputRef"
+           placeholder="Rally name" />
+}
 
+<!-- Quick actions -->
+<div style="margin-top:12px;">
+    <button @onclick="Save">Save Rally</button>
+    <button @onclick="Load">Load Rally</button>
+    <button @onclick="ExportXlsx">Export XLSX</button>
+    <button @onclick="ShareXlsx">Share XLSX</button>
+    <button @onclick="AddStage">Add Stage</button>
+</div>
 
-
-<!-- Quick persistence actions -->
-<button @onclick="Save">Save Rally</button>
-<button @onclick="Load">Load Rally</button>
-<button @onclick="ExportXlsx">Export XLSX</button>
-<button @onclick="ShareXlsx">Share XLSX</button>
-<button @onclick="AddStage">Add Stage</button>
+<!-- Load rally from saved files -->
+<div style="margin-top:12px;">
+    <select @onchange="OnRallySelectionChanged" style="min-width:18ch;" value="@selectedRallyFile">
+        <option value="">-- Select a rally to load --</option>
+        @foreach (var rallyFile in availableRallies)
+        {
+            <option value="@rallyFile.FileName">@rallyFile.DisplayName</option>
+        }
+    </select>
+    <button @onclick="RefreshRallyList" title="Refresh rally list">🔄</button>
+    @if (!string.IsNullOrEmpty(selectedRallyFile))
+    {
+        <button @onclick="LoadSelectedRally">Load Selected</button>
+        <button @onclick="DeleteSelectedRallyWithConfirmation" style="color: red;">Delete</button>
+    }
+</div>
 
 <!-- Stage list -->
 <ul style="margin-top:12px;">
@@ -28,63 +62,302 @@
         <li><a href="@($"/stage/{st.Id}")">@st.Id (@st.Name)</a></li>
     }
 </ul>
+
 <hr />
 
+<!-- Rally summary -->
 <h3>Rally Summary</h3>
 <p>Total Distance: @TotalDistance km</p>
 <p>Total Time: @TotalTime min</p>
 <p>Average Speed: @AverageSpeed km/h</p>
 
-
 @code {
-    // Store the file in the app's private data folder
-    private string RallyPath => Path.Combine(FileSystem.AppDataDirectory, "rally.json");
-    private string XlsxPath
+    #region Dependencies and References
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
+    #endregion
+
+    #region Rally Name Editing State
+    private ElementReference nameInputRef;
+    private bool shouldFocusName;
+    private bool isEditingName = false;
+    private string? tempName = null;
+    #endregion
+
+    #region Rally Selection State
+    private string? selectedRallyFile;
+    private List<RallyFileInfo> availableRallies = new();
+
+    private class RallyFileInfo
     {
-        get
-        {
+        public string FileName { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public DateTime LastModified { get; set; }
+    }
+    #endregion
+
+    #region File System Helpers
+    private static string RalliesDir =>
+        Path.Combine(FileSystem.AppDataDirectory, "rallies");
+
+    private static string MakeSafeFileName(string name)
+    {
+        // Keep letters, digits, space, dash, underscore; replace others with '_'
+        var safe = new string(name.Select(ch =>
+            char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '_'
+                ? ch
+                : '_').ToArray());
+
+        safe = safe.Trim();
+        if (string.IsNullOrEmpty(safe))
+            safe = "Rally";
+
+        // Ensure .json extension
+        if (!safe.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            safe += ".json";
+
+        return safe;
+    }
+
+    private static string MakeSafeFileNameWithExtension(string name, string extension)
+    {
+        // Keep letters, digits, space, dash, underscore; replace others with '_'
+        var safe = new string(name.Select(ch =>
+            char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '_'
+                ? ch
+                : '_').ToArray());
+
+        safe = safe.Trim();
+        if (string.IsNullOrEmpty(safe))
+            safe = "Rally";
+
+        // Ensure correct extension
+        if (!safe.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            safe += extension;
+
+        return safe;
+    }
+
+    private static string BuildRallyPath(string fileName)
+    {
+        if (!Directory.Exists(RalliesDir))
+            Directory.CreateDirectory(RalliesDir);
+
+        return Path.Combine(RalliesDir, fileName);
+    }
+
+    private string GetXlsxPath()
+    {
+        var fileName = MakeSafeFileNameWithExtension(RallyState.CurrentRally.Name, ".xlsx");
+        
 #if ANDROID
-        // Typical public Download folder in Android
-        return Path.Combine("/storage/emulated/0/Download", "Sections.xlsx");
+        return Path.Combine("/storage/emulated/0/Download", fileName);
 #else
-            // Fallback for other platforms
-            return Path.Combine(FileSystem.AppDataDirectory, "Sections.xlsx");
+        return Path.Combine(FileSystem.AppDataDirectory, fileName);
 #endif
+    }
+    #endregion
+
+    #region Lifecycle Methods
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshRallyList();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (shouldFocusName)
+        {
+            shouldFocusName = false;
+            await nameInputRef.FocusAsync();
+            await JSRuntime.InvokeVoidAsync("selectAllText", nameInputRef);
+        }
+    }
+    #endregion
+
+    #region Rally Name Editing
+    private void BeginEditName()
+    {
+        isEditingName = true;
+        tempName = RallyState.CurrentRally.Name;
+        shouldFocusName = true;
+    }
+
+    private void CommitEditName()
+    {
+        isEditingName = false;
+        tempName = null;
+    }
+
+    private void CancelEditName()
+    {
+        RallyState.CurrentRally.Name = tempName ?? RallyState.CurrentRally.Name;
+        isEditingName = false;
+        tempName = null;
+    }
+
+    private void HandleNameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter")
+            CommitEditName();
+        else if (e.Key is "Escape")
+            CancelEditName();
+    }
+    #endregion
+
+    #region Rally Selection and Management
+    private async Task RefreshRallyList()
+    {
+        await Task.Yield(); // Ensures method is truly async
+        availableRallies.Clear();
+        
+        if (!Directory.Exists(RalliesDir))
+        {
+            return;
+        }
+
+        var rallyFiles = Directory.GetFiles(RalliesDir, "*.json");
+        
+        foreach (var filePath in rallyFiles)
+        {
+            var fileName = Path.GetFileName(filePath);
+            var displayName = Path.GetFileNameWithoutExtension(fileName);
+            var lastModified = File.GetLastWriteTime(filePath);
+            
+            availableRallies.Add(new RallyFileInfo
+            {
+                FileName = fileName,
+                DisplayName = displayName,
+                LastModified = lastModified
+            });
+        }
+
+        // Sort by last modified date (newest first)
+        availableRallies = availableRallies.OrderByDescending(r => r.LastModified).ToList();
+        StateHasChanged();
+    }
+
+    private void OnRallySelectionChanged(ChangeEventArgs e)
+    {
+        selectedRallyFile = e.Value?.ToString();
+    }
+
+    private async Task LoadSelectedRally()
+    {
+        if (string.IsNullOrEmpty(selectedRallyFile))
+        {
+            await Toast.Make("Please select a rally to load.", ToastDuration.Short, 14).Show();
+            return;
+        }
+
+        var path = BuildRallyPath(selectedRallyFile);
+        
+        if (!File.Exists(path))
+        {
+            await Toast.Make($"Rally file not found: {selectedRallyFile}", ToastDuration.Short, 14).Show();
+            await RefreshRallyList();
+            return;
+        }
+
+        try
+        {
+            RallyState.CurrentRally = await RallyStore.LoadAsync(path);
+            RallyState.SelectFirstStage();
+            StateHasChanged();
+            await Toast.Make($"Rally loaded: {Path.GetFileNameWithoutExtension(selectedRallyFile)}", ToastDuration.Short, 14).Show();
+        }
+        catch (Exception ex)
+        {
+            await Toast.Make($"Error loading rally: {ex.Message}", ToastDuration.Short, 14).Show();
         }
     }
 
+    private async Task DeleteSelectedRally()
+    {
+        if (string.IsNullOrEmpty(selectedRallyFile))
+        {
+            return;
+        }
 
+        var path = BuildRallyPath(selectedRallyFile);
+        
+        if (File.Exists(path))
+        {
+            try
+            {
+                File.Delete(path);
+                await Toast.Make($"Rally deleted: {Path.GetFileNameWithoutExtension(selectedRallyFile)}", ToastDuration.Short, 14).Show();
+                selectedRallyFile = null;
+                await RefreshRallyList();
+            }
+            catch (Exception ex)
+            {
+                await Toast.Make($"Error deleting rally: {ex.Message}", ToastDuration.Short, 14).Show();
+            }
+        }
+    }
+
+    private async Task DeleteSelectedRallyWithConfirmation()
+    {
+        if (string.IsNullOrEmpty(selectedRallyFile))
+        {
+            return;
+        }
+
+        var displayName = Path.GetFileNameWithoutExtension(selectedRallyFile);
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", $"Are you sure you want to delete the rally '{displayName}'?");
+        
+        if (confirmed)
+        {
+            await DeleteSelectedRally();
+        }
+    }
+    #endregion
+
+    #region Rally Persistence
     private async Task Save()
     {
-        await RallyStore.SaveAsync(RallyState.CurrentRally, RallyPath);
+        var fileName = MakeSafeFileName(RallyState.CurrentRally.Name);
+        var path = BuildRallyPath(fileName);
+        
+        await RallyStore.SaveAsync(RallyState.CurrentRally, path);
+        await Toast.Make($"Rally saved as: {fileName}", ToastDuration.Short, 14).Show();
+        
+        // Refresh the rally list to include the newly saved rally
+        await RefreshRallyList();
     }
 
     private async Task Load()
     {
-        if (!File.Exists(RallyPath)) return;
-        RallyState.CurrentRally = await RallyStore.LoadAsync(RallyPath);
+        var fileName = MakeSafeFileName(RallyState.CurrentRally.Name);
+        var path = BuildRallyPath(fileName);
+        
+        if (!File.Exists(path))
+        {
+            await Toast.Make($"No rally found with name: {fileName}", ToastDuration.Short, 14).Show();
+            return;
+        }
+
+        RallyState.CurrentRally = await RallyStore.LoadAsync(path);
         RallyState.SelectFirstStage();
         StateHasChanged();
+        await Toast.Make($"Rally loaded: {fileName}", ToastDuration.Short, 14).Show();
     }
+    #endregion
 
-    private async Task ExportXlsx()  
+    #region Excel Export and Share
+    private async Task ExportXlsx()
     {
         var bytes = await ExcelExporter.BuildSectionsWorkbookAsync(RallyState.CurrentRally);
-        await File.WriteAllBytesAsync(XlsxPath, bytes);
-        // Optional: show a quick confirmation in console/log; UI toast can come later
-        Console.WriteLine($"Exported: {XlsxPath}");
-
-        // ✅ Show confirmation to the user
-        var toast = Toast.Make($"Rally Info File Exported to: {XlsxPath}",
-        ToastDuration.Short,
-        14); // font size
-        await toast.Show();
+        var xlsxPath = GetXlsxPath();
+        await File.WriteAllBytesAsync(xlsxPath, bytes);
+        await Toast.Make($"Exported to: {Path.GetFileName(xlsxPath)}", ToastDuration.Short, 14).Show();
     }
-
 
     private async Task ShareXlsx()
     {
-        if (!File.Exists(XlsxPath))
+        var xlsxPath = GetXlsxPath();
+        
+        if (!File.Exists(xlsxPath))
         {
             await Toast.Make("No file to share. Export first.", ToastDuration.Short, 14).Show();
             return;
@@ -93,29 +366,25 @@
         await Share.RequestAsync(new ShareFileRequest
         {
             Title = "Rabbit Rally Export",
-            File = new ShareFile(XlsxPath)
+            File = new ShareFile(xlsxPath)
         });
 
         await Toast.Make("Share sheet opened.", ToastDuration.Short, 14).Show();
     }
+    #endregion
 
-    private Task DisplayAlert(string title, string message, string cancel)
-    {
-        var page = Application.Current?.Windows[0].Page;
-        return page?.DisplayAlert(title, message, cancel)
-               ?? Task.CompletedTask;
-    }
-
-
+    #region Stage Management
     private void AddStage() => RallyState.AddStage();
+    #endregion
 
+    #region Rally Summary Properties
     private double TotalDistance =>
-    RallyState.CurrentRally.Stages.SelectMany(s => s.Segments).Sum(seg => seg.DistanceKm ?? 0);
-    
+        RallyState.CurrentRally.Stages.SelectMany(s => s.Segments).Sum(seg => seg.DistanceKm ?? 0);
+
     private double TotalTime =>
-    RallyState.CurrentRally.Stages.SelectMany(s => s.Segments).Sum(seg => seg.TimeMin ?? 0);
+        RallyState.CurrentRally.Stages.SelectMany(s => s.Segments).Sum(seg => seg.TimeMin ?? 0);
 
     private double AverageSpeed =>
-    TotalTime > 0 ? Math.Round((TotalDistance / TotalTime) * 60.0, 1) : 0.0;
-
+        TotalTime > 0 ? Math.Round((TotalDistance / TotalTime) * 60.0, 1) : 0.0;
+    #endregion
 }

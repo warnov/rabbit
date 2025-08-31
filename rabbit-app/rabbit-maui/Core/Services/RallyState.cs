@@ -43,20 +43,20 @@ namespace rabbit_maui.Core.Services
         /// <summary>
         /// Adds a new section (E{n}-T{m}) to the given stage.
         /// </summary>
-        public Segment AddSegment(Stage stage, double distanceKm, double timeMin)
+        public Segment AddSegment(Stage stage, double? distanceKm=null, double? timeMin = null)
         {
             var stageNumber = CurrentRally.Stages.IndexOf(stage) + 1;
             var sectionIndex = stage.Segments.Count + 1;
 
-            var section = new Segment
+            var segment = new Segment
             {
                 Id = $"E{stageNumber}-T{sectionIndex}",
                 DistanceKm = distanceKm,
                 TimeMin = timeMin
             };
 
-            stage.Segments.Add(section);
-            return section;
+            stage.Segments.Add(segment);
+            return segment;
         }
 
         /// <summary>

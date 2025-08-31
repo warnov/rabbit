@@ -86,3 +86,61 @@ h1:focus {
         padding-left: env(safe-area-inset-left);
     }
 }
+
+/* Segments table: fixed layout prevents horizontal scrolling on mobile */
+.segment-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+    .segment-table th,
+    .segment-table td {
+        padding: 6px 8px;
+    }
+
+        /* Suggested column widths: ZR | km | min | km/h | actions */
+        .segment-table th:nth-child(1),
+        .segment-table td:nth-child(1) {
+            width: 26%;
+        }
+        /* ZR */
+        .segment-table th:nth-child(2),
+        .segment-table td:nth-child(2) {
+            width: 20%;
+        }
+        /* km */
+        .segment-table th:nth-child(3),
+        .segment-table td:nth-child(3) {
+            width: 20%;
+        }
+        /* min */
+        .segment-table th:nth-child(4),
+        .segment-table td:nth-child(4) {
+            width: 18%;
+        }
+        /* km/h */
+        .segment-table th:nth-child(5),
+        .segment-table td:nth-child(5) {
+            width: 16%;
+        }
+/* actions */
+
+/* Compact numeric inputs sized by character units (ch) */
+.num-input {
+    width: 100%;
+    max-width: 7ch; /* e.g. 999.9 for km */
+    box-sizing: border-box;
+}
+
+    .num-input.min {
+        max-width: 4ch; /* e.g. 9999 min */
+    }
+
+/* Prevent ZR ID from wrapping */
+.zr-id {
+    white-space: nowrap;
+}
+
+
+

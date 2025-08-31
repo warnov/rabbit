@@ -1,6 +1,7 @@
 ﻿@page "/stage/{stageId}"
 @using rabbit_maui.Core.Models
 @inject rabbit_maui.Core.Services.RallyState RallyState
+@inject IJSRuntime JSRuntime
 
 @code {
     [Parameter] public string? stageId { get; set; }
@@ -17,6 +18,18 @@
         RallyState.AddSegment(stage, km, min);
     }
 
+    private async Task AddEmptySegment()
+    {
+        if (stage is null) return;
+        RallyState.AddSegment(stage); // no args → null/null → inputs empty
+
+        // Wait for UI to render the new segment
+        await Task.Delay(50);
+
+        // Focus the last km input using a CSS selector
+        await JSRuntime.InvokeVoidAsync("focusLastKmInput");
+    }
+
     private void RemoveSegment(int index)
     {
         if (stage is null) return;
@@ -31,57 +44,73 @@
 
     private double StageAverageSpeed =>
     StageTotalTime > 0 ? Math.Round((StageTotalDistance / StageTotalTime) * 60.0, 1) : 0.0;
-
 }
 
 @if (stage is null)
 {
-        <p>Stage not found.</p>
+    <p>Stage not found.</p>
 }
 else
 {
-        <h2>@stage.Id (@stage.Name)</h2>
+    <h2>@stage.Id (@stage.Name)</h2>
 
-        <table>
+    @if (stage?.Segments.Any() == true)
+    {
+        <table class="segment-table">
             <thead>
                 <tr>
-                    <th>ZR NAME</th>
-                    <th>Distance (km)</th>
-                    <th>Time (min)</th>
-                    <th>Speed (km/h)</th>
+                    <th>ZR</th>
+                    <th>km</th>
+                    <th>min</th>
+                    <th>km/h</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
-            @for (int i = 0; i < stage.Segments.Count; i++)
-            {
-                var s = stage.Segments[i];
-                var index = i; // Captura la variable en el scope local
-                <tr>
-                    <td>@s.Id</td>
-                    <td>
-                        <input type="number" step="0.1"
-                               @bind="stage.Segments[index].DistanceKm"
-                               @bind:event="oninput" />
-                    </td>
-                    <td>
-                        <input type="number" step="1"
-                               @bind="stage.Segments[index].TimeMin"
-                               @bind:event="oninput" />
-                    </td>
-                    <td>@s.SpeedKmh</td>
-                    <td><button @onclick="@(()=>RemoveSegment(index))">Delete</button></td>
-                </tr>
-            }
+                @for (int i = 0; i < stage.Segments.Count; i++)
+                {
+                    var s = stage.Segments[i];
+                    var index = i;
+
+                    <tr @key="s.Id">
+                        <td class="zr-id">@s.Id</td>
+
+                        <td>
+                            <input class="num-input km-input"
+                                   type="number"
+                                   step="0.1"
+                                   inputmode="decimal"
+                                   @bind="stage.Segments[index].DistanceKm" />
+                        </td>
+
+                        <td>
+                            <input class="num-input min"
+                                   type="number"
+                                   step="1"
+                                   inputmode="numeric"
+                                   @bind="stage.Segments[index].TimeMin" />
+                        </td>
+
+                        <td>@s.SpeedKmh</td>
+
+                        <td>
+                            <button @onclick="@(() => RemoveSegment(index))">Delete</button>
+                        </td>
+                    </tr>
+                }
             </tbody>
         </table>
+    }
+    else
+    {
+        <p>No segments added yet.</p>
+    }
 
-        <button @onclick="@(()=>AddSegment(1.000, 1.0))">Add Segment</button>
+    <button @onclick="AddEmptySegment">Add Segment</button>
 
-        <hr />
-        <h3>Stage Summary</h3>
-        <p>Total Distance: @StageTotalDistance km</p>
-        <p>Total Time: @StageTotalTime min</p>
-        <p>Average Speed: @StageAverageSpeed km/h</p>
-
+    <hr />
+    <h3>Stage Summary</h3>
+    <p>Total Distance: @StageTotalDistance km</p>
+    <p>Total Time: @StageTotalTime min</p>
+    <p>Average Speed: @StageAverageSpeed km/h</p>
 }
