@@ -1,6 +1,6 @@
 
 
-# Rabbit Roadbook Converter
+# Txt2Rabbit
 
 This project provides two implementations for converting rally road book data into a format compatible with Rabbit:
 
